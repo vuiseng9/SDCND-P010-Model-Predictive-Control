@@ -9,6 +9,8 @@
 #include "MPC.h"
 #include "json.hpp"
 
+extern size_t N;
+
 // for convenience
 using json = nlohmann::json;
 
@@ -84,6 +86,7 @@ int main() {
         auto j = json::parse(s);
         string event = j[0].get<string>();
         if (event == "telemetry") {
+
           // j[1] is the data JSON object
           vector<double> ptsx = j[1]["ptsx"];
           vector<double> ptsy = j[1]["ptsy"];
@@ -92,7 +95,7 @@ int main() {
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
 
-          // Transform reference pts from map reference to car reference
+          // Transform waypts from map reference to car reference
           // Translation and Rotation
           
           Eigen::VectorXd wayptsx(ptsx.size());
@@ -101,102 +104,71 @@ int main() {
           for (int i = 0; i < ptsx.size(); i++) { 
             double dx = ptsx[i] - px;
             double dy = ptsy[i] - py;
-            //  next_x_vals.push_back( dx*cos(psi) + dy*sin(psi));
-            //  next_y_vals.push_back(-dy*sin(psi) + dx*cos(psi));
             wayptsx(i) = (dx * cos(-psi) - dy * sin(-psi));
             wayptsy(i) = (dx * sin(-psi) + dy * cos(-psi));
           }
 
-          /*
-          * TODO: Calculate steering angle and throttle using MPC.
-          *
-          * Both are in between [-1, 1].
-          *
-          */
-          //waypts fitting to a 3rd order polynomial
+          // waypts fitting to a 3rd order polynomial
           auto C = polyfit(wayptsx, wayptsy, 3);
 
           // Initial State
           // Since the coord system is w.r.t car, some of the state will be zero as initial state
-          double x_ = 0;
-          double y_ = 0;
-          double psi_ = 0;
-          double v_ = v;
-          double cte_ = polyeval(C, x_) - y_; 
-          double epsi_ = psi_ - atan(3*C[3]*pow(x_,2) + 2*C[2]*x_ + C[1]); //most term will be zero since x_ is zero
+          double x_     = 0;
+          double y_     = 0;
+          double psi_   = 0;
+          double v_     = v;
+          double cte_   = polyeval(C, x_) - y_; 
+          double epsi_  = psi_ - atan(3*C[3]*pow(x_,2) + 2*C[2]*x_ + C[1]); //most term will be zero since x_ is zero
 
           Eigen::VectorXd state(6);
           state << x_, y_, psi_, v_, cte_, epsi_;
 
+          // Call to solver
           auto ret_vals = mpc.Solve(state, C);
  
+          // Extract delta and acceleration value
 		  double delta_val = ret_vals.end()[-2];
 		  double a_val = ret_vals.end()[-1];
 
-          double steer_value = delta_val/deg2rad(25) * -1; //normalized to -1, 1 and convert to unity convention by *-1
+          //normalized to -1, 1 and convert to unity convention by *-1
+          // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
+          // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
+          double steer_value = delta_val/deg2rad(25) * -1;
           double throttle_value = a_val ; 
 
           json msgJson;
-          // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
-          // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
           msgJson["steering_angle"] = steer_value;
           msgJson["throttle"] = throttle_value;
 
-          //Display the MPC predicted trajectory 
+          // Display the MPC predicted trajectory in green color 
+          // appending predicted trajectory from solver-returned list
           vector<double> mpc_x_vals;
           vector<double> mpc_y_vals;
 
-          //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
-          // the points in the simulator are connected by a Green line
-          Eigen::VectorXd nwayptsx(25);
-          Eigen::VectorXd nwayptsy(25);
-
-          /*
-          * TODO: Calculate steering angle and throttle using MPC.
-          *
-          * Both are in between [-1, 1].
-          *
-          */
-          //waypts fitting to a 3rd order polynomial
-
-
-          for (int t = 0 ; t < 25; t++) {
-            nwayptsx(t) = ret_vals[t];
-            nwayptsy(t) = ret_vals[t+25];
-          }
- 
-          auto Cp = polyfit(nwayptsx, nwayptsy, 3);
-
- 		  for (int xtick = 0; xtick<50; xtick+=5) {
-		  	mpc_x_vals.push_back(xtick);
-			mpc_y_vals.push_back(polyeval(Cp,xtick));
+          for (int t = 0 ; t < N; t++) {
+              mpc_x_vals.push_back(ret_vals[t]);
+              mpc_y_vals.push_back(ret_vals[t+N]);
           }
 
           msgJson["mpc_x"] = mpc_x_vals;
           msgJson["mpc_y"] = mpc_y_vals;
    
-          //Display the waypoints/reference line
+          // Display the waypoints/reference line in yellow color
+          // corresponding y is evaluated based on mpc_x
           vector<double> next_x_vals;
           vector<double> next_y_vals;
 
-          //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
-          // the points in the simulator are connected by a Yellow line
-/*
-    	  next_x_vals.resize(wayptsx.size());
-    	  next_y_vals.resize(wayptsy.size());
-    	  Eigen::VectorXd::Map(&next_x_vals[0], wayptsx.size()) = wayptsx;
-    	  Eigen::VectorXd::Map(&next_y_vals[0], wayptsy.size()) = wayptsy;
-*/
-		  for (int xtick = 0; xtick<50; xtick+=5) {
-		  	next_x_vals.push_back(xtick);
-			next_y_vals.push_back(polyeval(C,xtick));
+		  for (int xtick = 0; xtick<N; xtick++) {
+		  	next_x_vals.push_back(mpc_x_vals[xtick]);
+			next_y_vals.push_back(polyeval(C,mpc_x_vals[xtick]));
           }
+
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
 
-
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
           std::cout << msg << std::endl;
+
           // Latency
           // The purpose is to mimic real driving conditions where
           // the car does actuate the commands instantly.

@@ -14,9 +14,7 @@ using CppAD::AD;
 // and the timestep evaluation frequency or evaluation
 // period to 0.05.
 size_t N = 25;
-double dt = 0.001;
-//size_t N = 10;
-//double dt = 0.1;
+double dt = 0.05;
 
 // This value assumes the model presented in the classroom is used.
 //
@@ -75,7 +73,7 @@ class FG_eval {
 
     // Minimize the value gap between sequential actuations.
     for (int t = 0; t < N - 2; t++) {
-      fg[0] += CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
+      fg[0] += 1000 * CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
       fg[0] += CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
     }
 
@@ -118,8 +116,15 @@ class FG_eval {
       AD<double> delta0 = vars[delta_start + t - 1];
       AD<double> a0 = vars[a_start + t - 1];
 
-      AD<double> f0 = coeffs[0] + coeffs[1] * x0;
-      AD<double> psides0 = CppAD::atan(coeffs[1]);
+      AD<double> f0 = 0.0f;
+      AD<double> psides0 = 0.0f;
+
+      for (int i=0; i<coeffs.size(); i++) {
+        f0      +=   coeffs[i] * CppAD::pow(x0, i);
+        psides0 += i*coeffs[i] * CppAD::pow(x0, i-1); //derivative of f at x0
+      }      
+
+      psides0 = CppAD::atan(coeffs[1]);
 
       // Here's `x` to get you started.
       // The idea here is to constraint this value to be 0.
