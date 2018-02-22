@@ -94,6 +94,8 @@ int main() {
           double py = j[1]["y"];
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
+          double delta = j[1]["steering_angle"];
+          double a = j[1]["throttle"];
 
           // Transform waypts from map reference to car reference
           // Translation and Rotation
@@ -120,8 +122,19 @@ int main() {
           double cte_   = polyeval(C, x_) - y_; 
           double epsi_  = psi_ - atan(3*C[3]*pow(x_,2) + 2*C[2]*x_ + C[1]); //most term will be zero since x_ is zero
 
+          // incorporate actuation delay
+          double latency_sec = 0.1;
+          double Lf = 2.67;
+          double x_delay    = x_    + v_ * cos(psi_) * latency_sec;
+          double y_delay    = y_    + v_ * sin(psi_) * latency_sec;
+          double psi_delay  = psi_  - v_ / Lf * delta * latency_sec;
+          double v_delay    = v_    + a * latency_sec;
+          double cte_delay  = cte_  + v_ * sin(epsi_) * latency_sec;
+          double epsi_delay = epsi_ - v_ / Lf * delta * latency_sec;
+
           Eigen::VectorXd state(6);
-          state << x_, y_, psi_, v_, cte_, epsi_;
+          //state << x_, y_, psi_, v_, cte_, epsi_;
+          state << x_delay, y_delay, psi_delay, v_delay, cte_delay, epsi_delay;
 
           // Call to solver
           auto ret_vals = mpc.Solve(state, C);
@@ -154,13 +167,14 @@ int main() {
           msgJson["mpc_y"] = mpc_y_vals;
    
           // Display the waypoints/reference line in yellow color
-          // corresponding y is evaluated based on mpc_x
+          // 25 units in x with delay offset in x
           vector<double> next_x_vals;
           vector<double> next_y_vals;
 
-		  for (int xtick = 0; xtick<N; xtick++) {
-		  	next_x_vals.push_back(mpc_x_vals[xtick]);
-			next_y_vals.push_back(polyeval(C,mpc_x_vals[xtick]));
+		  for (int xtick = 0; xtick<60; xtick+=3) {
+            double _x = x_delay + xtick;
+		  	next_x_vals.push_back(_x);
+			next_y_vals.push_back(polyeval(C,_x));
           }
 
           msgJson["next_x"] = next_x_vals;
@@ -178,7 +192,7 @@ int main() {
           //
           // NOTE: REMEMBER TO SET THIS TO 100 MILLISECONDS BEFORE
           // SUBMITTING.
-//          this_thread::sleep_for(chrono::milliseconds(100));
+          this_thread::sleep_for(chrono::milliseconds(100));
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }
       } else {
