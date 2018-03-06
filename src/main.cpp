@@ -99,7 +99,6 @@ int main() {
 
           // Transform waypts from map reference to car reference
           // Translation and Rotation
-          
           Eigen::VectorXd wayptsx(ptsx.size());
           Eigen::VectorXd wayptsy(ptsy.size());
 
@@ -110,19 +109,21 @@ int main() {
             wayptsy(i) = (dx * sin(-psi) + dy * cos(-psi));
           }
 
-          // waypts fitting to a 3rd order polynomial
+          // Fit waypts to a 3rd order polynomial
           auto C = polyfit(wayptsx, wayptsy, 3);
 
           // Initial State
-          // Since the coord system is w.r.t car, some of the state will be zero as initial state
+          // Since the State takes car as reference system 
+          // some of the state will be zero as initial state
           double x_     = 0;
           double y_     = 0;
           double psi_   = 0;
           double v_     = v;
           double cte_   = polyeval(C, x_) - y_; 
-          double epsi_  = psi_ - atan(3*C[3]*pow(x_,2) + 2*C[2]*x_ + C[1]); //most term will be zero since x_ is zero
+          // most term of epsi_ will be zero since x_ is zero
+          double epsi_  = psi_ - atan(3*C[3]*pow(x_,2) + 2*C[2]*x_ + C[1]); 
 
-          // incorporate actuation delay
+          // Account actuator dynamic delay by taking state 100ms in advance
           double latency_sec = 0.1;
           double Lf = 2.67;
           double x_delay    = x_    + v_ * cos(psi_) * latency_sec;
@@ -132,22 +133,22 @@ int main() {
           double cte_delay  = cte_  + v_ * sin(epsi_) * latency_sec;
           double epsi_delay = epsi_ - v_ / Lf * delta * latency_sec;
 
+          // Setup initial state
           Eigen::VectorXd state(6);
-          //state << x_, y_, psi_, v_, cte_, epsi_;
           state << x_delay, y_delay, psi_delay, v_delay, cte_delay, epsi_delay;
 
           // Call to solver
           auto ret_vals = mpc.Solve(state, C);
  
-          // Extract delta and acceleration value
+          // Extract actuators, delta and acceleration value
 		  double delta_val = ret_vals.end()[-2];
 		  double a_val = ret_vals.end()[-1];
 
-          //normalized to -1, 1 and convert to unity convention by *-1
+          // normalized to -1, 1 and convert to unity convention by *-1
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
           double steer_value = delta_val/deg2rad(25) * -1;
-          double throttle_value = a_val ; 
+          double throttle_value = a_val; 
 
           json msgJson;
           msgJson["steering_angle"] = steer_value;
@@ -167,7 +168,7 @@ int main() {
           msgJson["mpc_y"] = mpc_y_vals;
    
           // Display the waypoints/reference line in yellow color
-          // 25 units in x with delay offset in x
+          // 60 units in x with delay offset in x
           vector<double> next_x_vals;
           vector<double> next_y_vals;
 
